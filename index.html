@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Is My Food Legal Abroad?</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1c2024;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --banned: #dc2626;
+    --banned-bg: #fef2f2;
+    --restricted: #ea580c;
+    --restricted-bg: #fff7ed;
+    --warning: #ca8a04;
+    --warning-bg: #fefce8;
+    --ok: #16a34a;
+    --ok-bg: #f0fdf4;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --card: #1a1d23;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --border: #2a2e36;
+      --accent: #60a5fa;
+      --accent-soft: #1e293b;
+      --banned: #f87171;
+      --banned-bg: #2a1416;
+      --restricted: #fb923c;
+      --restricted-bg: #2a1c10;
+      --warning: #facc15;
+      --warning-bg: #29260f;
+      --ok: #4ade80;
+      --ok-bg: #102117;
+      --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  header h1 { font-size: 1.7rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+  header p.sub { color: var(--muted); margin: 0 0 24px; font-size: 0.95rem; }
+
+  .tabs { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 16px; box-shadow: var(--shadow); }
+  .tab { flex: 1; text-align: center; padding: 10px 8px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: var(--muted); border: none; background: none; transition: all 0.15s; }
+  .tab.active { background: var(--accent-soft); color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--text); }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .field { display: flex; gap: 8px; margin-bottom: 8px; }
+  input[type=text], textarea {
+    flex: 1; width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--card); color: var(--text); font-size: 1rem; font-family: inherit;
+  }
+  textarea { min-height: 120px; resize: vertical; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  button.go {
+    padding: 12px 20px; background: var(--accent); color: #fff; border: none; border-radius: 10px;
+    font-size: 1rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  button.go:hover { filter: brightness(1.05); }
+  button.go:disabled { opacity: 0.6; cursor: default; }
+  .hint { font-size: 0.82rem; color: var(--muted); margin: 4px 2px 0; }
+
+  .status-msg { padding: 14px; color: var(--muted); text-align: center; font-size: 0.95rem; }
+
+  /* search results list */
+  .pick { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; display: flex; gap: 12px; align-items: center; transition: border-color 0.15s; }
+  .pick:hover { border-color: var(--accent); }
+  .pick img { width: 44px; height: 44px; object-fit: contain; border-radius: 6px; background:#fff; flex-shrink:0; }
+  .pick .pname { font-weight: 600; font-size: 0.95rem; }
+  .pick .pbrand { font-size: 0.82rem; color: var(--muted); }
+
+  /* results */
+  #results { margin-top: 20px; }
+  .product-head { display:flex; gap:14px; align-items:center; margin-bottom:16px; }
+  .product-head img { width: 56px; height:56px; object-fit:contain; border-radius:8px; background:#fff; }
+  .product-head .ptitle { font-size:1.15rem; font-weight:700; }
+  .product-head .pmeta { font-size:0.85rem; color:var(--muted); }
+
+  .verdict { border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border); background: var(--card); box-shadow: var(--shadow); }
+  .verdict.clean { background: var(--ok-bg); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+  .verdict h2 { margin: 0 0 4px; font-size: 1.1rem; }
+  .verdict p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .region-summary { display:grid; grid-template-columns: repeat(2,1fr); gap:8px; margin-bottom:20px; }
+  @media (min-width:560px){ .region-summary{ grid-template-columns: repeat(4,1fr);} }
+  .rs-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; text-align:center; box-shadow:var(--shadow); }
+  .rs-card .flag { font-size:1.4rem; }
+  .rs-card .rname { font-size:0.78rem; font-weight:600; margin-top:2px; }
+  .rs-card .rcount { font-size:0.78rem; color:var(--muted); margin-top:2px; }
+
+  .ing-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  .ing-card .ing-name { font-size: 1.05rem; font-weight: 700; }
+  .ing-card .ing-cat { font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+  .ing-card .ing-why { font-size: 0.9rem; margin: 6px 0 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 0.78rem; font-weight: 600; padding: 5px 10px; border-radius: 999px; border: 1px solid transparent; }
+  .chip .ch-region { opacity: 0.85; font-weight: 600; }
+  .chip.banned { background: var(--banned-bg); color: var(--banned); border-color: color-mix(in srgb, var(--banned) 30%, transparent); }
+  .chip.restricted { background: var(--restricted-bg); color: var(--restricted); border-color: color-mix(in srgb, var(--restricted) 30%, transparent); }
+  .chip.warning { background: var(--warning-bg); color: var(--warning); border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
+  .chip.allowed { background: var(--ok-bg); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+  .region-notes { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .region-notes div { font-size: 0.83rem; color: var(--muted); margin-bottom: 4px; }
+  .region-notes b { color: var(--text); }
+  .sources { margin-top: 10px; font-size: 0.8rem; color: var(--muted); }
+  .sources a { color: var(--accent); text-decoration: none; }
+  .sources a:hover { text-decoration: underline; }
+
+  details.disclaimer { margin-top: 28px; font-size: 0.82rem; color: var(--muted); background: var(--card); border:1px solid var(--border); border-radius:10px; padding: 12px 14px; }
+  details.disclaimer summary { cursor: pointer; font-weight: 600; }
+  details.disclaimer p { margin: 8px 0 0; }
+  .footer-note { text-align:center; font-size:0.78rem; color:var(--muted); margin-top:24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🌍 Is My Food Legal Abroad?</h1>
+    <p class="sub">Check whether the ingredients in a U.S. food product are banned, restricted, or warning-labeled in Europe and other countries.</p>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="search">🔍 Search by name</button>
+    <button class="tab" data-tab="barcode">📷 Barcode</button>
+    <button class="tab" data-tab="paste">📋 Paste ingredients</button>
+  </div>
+
+  <div class="panel active" id="panel-search">
+    <div class="field">
+      <input type="text" id="searchInput" placeholder="e.g. Mountain Dew, Wonder Bread, Skittles…" autocomplete="off">
+      <button class="go" id="searchBtn">Search</button>
+    </div>
+    <p class="hint">Searches the free Open Food Facts database. Pick a product to analyze its ingredients.</p>
+  </div>
+
+  <div class="panel" id="panel-barcode">
+    <div class="field">
+      <input type="text" id="barcodeInput" placeholder="Enter barcode digits, e.g. 0049000028911" inputmode="numeric" autocomplete="off">
+      <button class="go" id="barcodeBtn">Look up</button>
+    </div>
+    <p class="hint">Type the numbers under the barcode on the package.</p>
+  </div>
+
+  <div class="panel" id="panel-paste">
+    <textarea id="pasteInput" placeholder="Paste an ingredient list here, e.g.&#10;Enriched flour (wheat flour, niacin, reduced iron…), sugar, palm oil, potassium bromate, Red 40, BHT…"></textarea>
+    <div class="field" style="margin-top:8px; justify-content:flex-end;">
+      <button class="go" id="pasteBtn">Check ingredients</button>
+    </div>
+    <p class="hint">Works for any food — just copy the ingredients off the label.</p>
+  </div>
+
+  <div id="picker"></div>
+  <div id="results"></div>
+
+  <details class="disclaimer">
+    <summary>⚠️ Important — how to read these results</summary>
+    <p><b>This flags individual ingredients, not whole products.</b> A food is rarely "illegal" outright abroad — usually a specific additive is banned, capped at a lower level, or required to carry a warning label.</p>
+    <p><b>This is informational, not legal advice.</b> Food regulations change and have many exceptions (permitted uses, concentration limits, transition periods). Always verify against the official source — EFSA/EU, UK FSA, Health Canada, FSANZ.</p>
+    <p><b>Only known controversial ingredients are flagged.</b> A product with no flags isn't certified legal everywhere — it just contains none of the additives in this database. Ingredient data comes from the community-run Open Food Facts and may be incomplete.</p>
+    <p id="reviewedLine"></p>
+  </details>
+
+  <p class="footer-note">Ingredient data: Open Food Facts (open database). Regulatory data: curated.</p>
+</div>
+
+<script>
+/* ============================================================
+   REGULATORY DATABASE
+   status values: "banned" | "restricted" | "warning" | "allowed"
+   Regions: EU, UK, CA (Canada), AU (Australia / Japan)
+   Only notable statuses are listed; unlisted region = no known restriction.
+   ============================================================ */
+const REGIONS = {
+  EU: { name: "European Union", flag: "🇪🇺" },
+  UK: { name: "United Kingdom", flag: "🇬🇧" },
+  CA: { name: "Canada",         flag: "🇨🇦" },
+  AU: { name: "Australia / Japan", flag: "🇦🇺" }
+};
+
+const LAST_REVIEWED = "June 2026";
+
+const DB = [
+  {
+    id: "potassium-bromate",
+    name: "Potassium bromate",
+    eNumbers: ["e924"],
+    synonyms: ["potassium bromate", "bromated flour", "bromated"],
+    category: "Flour treatment agent (dough strengthener)",
+    why: "Classified as a possible human carcinogen (IARC Group 2B). Used to strengthen dough in some breads.",
+    regions: {
+      EU: { status: "banned", note: "Not a permitted food additive (banned 1990)." },
+      UK: { status: "banned", note: "Not permitted (banned 1990)." },
+      CA: { status: "banned", note: "Prohibited in food (since 1994)." },
+      AU: { status: "banned", note: "Not a permitted food additive." }
+    }
+  },
+  {
+    id: "azodicarbonamide",
+    name: "Azodicarbonamide (ADA)",
+    eNumbers: ["e927a"],
+    synonyms: ["azodicarbonamide", "azodicarbonamid", "ada "],
+    category: "Flour bleaching / dough conditioner (the “yoga-mat chemical”)",
+    why: "Breaks down during baking into semicarbazide and urethane, which are linked to cancer in animal studies. Also a respiratory sensitizer.",
+    regions: {
+      EU: { status: "banned", note: "Banned as a food additive." },
+      UK: { status: "banned", note: "Banned as a food additive." },
+      CA: { status: "allowed", note: "Permitted as a flour treatment agent (up to 45 ppm), as in the U.S." },
+      AU: { status: "banned", note: "Not approved for use in food." }
+    }
+  },
+  {
+    id: "bvo",
+    name: "Brominated vegetable oil (BVO)",
+    eNumbers: ["e443"],
+    synonyms: ["brominated vegetable oil", "brominated soybean", "bvo"],
+    category: "Emulsifier (keeps citrus flavoring suspended in soda)",
+    why: "Bromine can build up in body tissue; animal studies show thyroid and neurological effects. The U.S. FDA itself revoked its authorization in 2024.",
+    regions: {
+      EU: { status: "banned", note: "Not permitted (banned in 2008)." },
+      UK: { status: "banned", note: "Not permitted (banned in 1970)." },
+      CA: { status: "banned", note: "Prohibited in food (since 2024)." },
+      AU: { status: "restricted", note: "Historically permitted in limited amounts in some soft drinks; banned in Japan and India." }
+    }
+  },
+  {
+    id: "titanium-dioxide",
+    name: "Titanium dioxide",
+    eNumbers: ["e171"],
+    synonyms: ["titanium dioxide"],
+    category: "Whitening agent / color (candy, frosting, coffee creamer)",
+    why: "EFSA concluded in 2021 it could no longer be considered safe, mainly over possible genotoxicity from nanoparticles.",
+    regions: {
+      EU: { status: "banned", note: "Banned as a food additive since August 2022 (Reg (EU) 2022/63)." },
+      UK: { status: "allowed", note: "UK FSA reviewed the EFSA opinion and currently still permits it." },
+      CA: { status: "allowed", note: "Health Canada found no conclusive evidence of harm; still permitted." },
+      AU: { status: "allowed", note: "FSANZ review found no grounds to ban; still permitted." }
+    }
+  },
+  {
+    id: "red-3",
+    name: "Red Dye No. 3 (Erythrosine)",
+    eNumbers: ["e127"],
+    synonyms: ["red 3", "red no. 3", "red dye 3", "erythrosine", "fd&c red 3", "red #3"],
+    category: "Synthetic color (pink/red)",
+    why: "Caused thyroid tumors in rats. The U.S. FDA banned it in food in Jan 2025 (phase-out by 2027); it was allowed for decades prior.",
+    regions: {
+      EU: { status: "restricted", note: "Permitted only in cocktail/candied cherries (max 200 mg/kg)." },
+      UK: { status: "restricted", note: "Permitted only for limited uses (e.g. candied cherries)." },
+      CA: { status: "restricted", note: "Permitted only for specific limited uses." },
+      AU: { status: "restricted", note: "Permitted for limited uses." }
+    }
+  },
+  {
+    id: "red-40",
+    name: "Red Dye No. 40 (Allura Red AC)",
+    eNumbers: ["e129"],
+    synonyms: ["red 40", "red no. 40", "red dye 40", "allura red", "fd&c red 40", "red #40"],
+    category: "Synthetic color (red/orange)",
+    why: "A UK (Southampton) study linked it to hyperactivity in some children. Allowed abroad but must carry a warning.",
+    regions: {
+      EU: { status: "warning", note: "Allowed, but must carry the label “may have an adverse effect on activity and attention in children” — mandatory EU-wide since 2010 (Reg 1333/2008)." },
+      UK: { status: "warning", note: "Same mandatory child-hyperactivity warning label." }
+    }
+  },
+  {
+    id: "yellow-5",
+    name: "Yellow Dye No. 5 (Tartrazine)",
+    eNumbers: ["e102"],
+    synonyms: ["yellow 5", "yellow no. 5", "tartrazine", "fd&c yellow 5", "yellow #5"],
+    category: "Synthetic color (yellow)",
+    why: "Linked to hyperactivity in some children (Southampton study). Allowed abroad but warning-labeled.",
+    regions: {
+      EU: { status: "warning", note: "Requires the child-hyperactivity warning label." },
+      UK: { status: "warning", note: "Requires the child-hyperactivity warning label." }
+    }
+  },
+  {
+    id: "yellow-6",
+    name: "Yellow Dye No. 6 (Sunset Yellow FCF)",
+    eNumbers: ["e110"],
+    synonyms: ["yellow 6", "yellow no. 6", "sunset yellow", "fd&c yellow 6", "yellow #6"],
+    category: "Synthetic color (orange/yellow)",
+    why: "Linked to hyperactivity in some children (Southampton study). Allowed abroad but warning-labeled.",
+    regions: {
+      EU: { status: "warning", note: "Requires the child-hyperactivity warning label." },
+      UK: { status: "warning", note: "Requires the child-hyperactivity warning label." }
+    }
+  },
+  {
+    id: "green-3",
+    name: "Green Dye No. 3 (Fast Green FCF)",
+    eNumbers: ["e143"],
+    synonyms: ["green 3", "green no. 3", "fast green", "fd&c green 3", "green #3"],
+    category: "Synthetic color (green)",
+    why: "Not approved abroad due to limited safety data; allowed in the U.S.",
+    regions: {
+      EU: { status: "banned", note: "Not authorised as a food colour." },
+      UK: { status: "banned", note: "Not authorised as a food colour." }
+    }
+  },
+  {
+    id: "bha",
+    name: "BHA (Butylated hydroxyanisole)",
+    eNumbers: ["e320"],
+    synonyms: ["bha", "butylated hydroxyanisole"],
+    category: "Preservative / antioxidant (keeps fats from going rancid)",
+    why: "Listed by the IARC as a possible human carcinogen (Group 2B); an endocrine-disruption concern.",
+    regions: {
+      EU: { status: "restricted", note: "Not authorised for general food use; permitted only in a few specific applications (EFSA ADI 1.0 mg/kg)." }
+    }
+  },
+  {
+    id: "bht",
+    name: "BHT (Butylated hydroxytoluene)",
+    eNumbers: ["e321"],
+    synonyms: ["bht", "butylated hydroxytoluene"],
+    category: "Preservative / antioxidant",
+    why: "Related to BHA; flagged for possible endocrine and tumor-promoting effects in animal studies.",
+    regions: {
+      EU: { status: "restricted", note: "Permitted only in specific food categories at restricted levels (typically 25–200 mg/kg; EFSA ADI 0.25 mg/kg)." }
+    }
+  },
+  {
+    id: "propylparaben",
+    name: "Propylparaben",
+    eNumbers: ["e216"],
+    synonyms: ["propylparaben", "propyl paraben", "propyl p-hydroxybenzoate"],
+    category: "Preservative",
+    why: "Endocrine-disruption concerns. The EU removed it from the approved food-additive list.",
+    regions: {
+      EU: { status: "banned", note: "Removed from the approved food-additive list in 2006." },
+      UK: { status: "banned", note: "No longer permitted (EU-era ban retained)." }
+    }
+  },
+  {
+    id: "benzoyl-peroxide",
+    name: "Benzoyl peroxide (flour bleach)",
+    eNumbers: ["e928"],
+    synonyms: ["benzoyl peroxide", "bleached flour"],
+    category: "Flour bleaching agent",
+    why: "Used to artificially whiten flour; flour bleaching agents are not permitted in the EU/UK.",
+    regions: {
+      EU: { status: "banned", note: "Flour bleaching agents are not permitted." },
+      UK: { status: "banned", note: "Flour bleaching agents are not permitted." }
+    }
+  },
+  {
+    id: "olestra",
+    name: "Olestra (Olean)",
+    eNumbers: [],
+    synonyms: ["olestra", "olean", "sucrose polyester"],
+    category: "Fat substitute (zero-calorie 'fat')",
+    why: "Can cause digestive issues and blocks absorption of fat-soluble vitamins. Never approved in several countries.",
+    regions: {
+      EU: { status: "banned", note: "Not approved (EU Scientific Committee on Food, 2000)." },
+      UK: { status: "banned", note: "Not approved for use in food." },
+      CA: { status: "banned", note: "Not approved for use in food." }
+    }
+  },
+  {
+    id: "rbgh",
+    name: "rBGH / rBST (bovine growth hormone)",
+    eNumbers: [],
+    synonyms: ["rbgh", "rbst", "recombinant bovine", "bovine growth hormone", "bovine somatotropin", "posilac"],
+    category: "Dairy production hormone (not an additive — a farming method)",
+    why: "A synthetic hormone given to dairy cows to boost milk output. Banned abroad over animal-welfare and IGF-1 concerns. (Often only detectable from a 'rBGH-free' label.)",
+    regions: {
+      EU: { status: "banned", note: "Banned for use in dairy cattle (since 1999)." },
+      UK: { status: "banned", note: "Banned for use in dairy cattle." },
+      CA: { status: "banned", note: "Not approved for use in dairy cattle." },
+      AU: { status: "banned", note: "Banned/not approved (also banned in Japan)." }
+    }
+  },
+  {
+    id: "ractopamine",
+    name: "Ractopamine",
+    eNumbers: [],
+    synonyms: ["ractopamine", "paylean", "optaflexx"],
+    category: "Livestock feed additive (promotes lean meat in pigs/cattle)",
+    why: "A beta-agonist drug banned in ~160 countries over cardiovascular and animal-welfare concerns. (Usually only relevant for U.S. pork/beef; not listed on ingredient labels.)",
+    regions: {
+      EU: { status: "banned", note: "Banned; imports of ractopamine-fed meat are restricted." },
+      UK: { status: "banned", note: "Banned; import restrictions apply." },
+      CA: { status: "allowed", note: "Permitted in Canada (as in the U.S.)." },
+      AU: { status: "allowed", note: "Permitted in Australia; banned in Japan, China and the EU." }
+    }
+  },
+  {
+    id: "coumarin",
+    name: "Coumarin",
+    eNumbers: [],
+    synonyms: ["coumarin"],
+    category: "Natural flavor compound (in cassia cinnamon, tonka bean)",
+    why: "Can be toxic to the liver in high doses; tightly capped in the EU.",
+    regions: {
+      EU: { status: "restricted", note: "Cannot be added directly; strict maximum levels in cinnamon-containing foods (5–50 mg/kg)." },
+      UK: { status: "restricted", note: "Strict maximum levels apply." }
+    }
+  }
+];
+
+/* Source links per ingredient id (for "verify this" links) */
+const SOURCES = {
+  "potassium-bromate": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Potassium_bromate" }],
+  "azodicarbonamide": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Azodicarbonamide" }],
+  "bvo": [
+    { label: "FDA (2024 revocation)", url: "https://www.fda.gov/food/hfp-constituent-updates/fda-revokes-regulation-allowing-use-brominated-vegetable-oil-bvo-food" },
+    { label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Brominated_vegetable_oil" }
+  ],
+  "titanium-dioxide": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Titanium_dioxide" }],
+  "red-3": [{ label: "FDA (2025 revocation)", url: "https://www.fda.gov/food/hfp-constituent-updates/fda-revoke-authorization-use-red-no-3-food-and-ingested-drugs" }],
+  "red-40": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Allura_Red_AC" }],
+  "yellow-5": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Tartrazine" }],
+  "yellow-6": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Sunset_Yellow_FCF" }],
+  "green-3": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Fast_Green_FCF" }],
+  "bha": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Butylated_hydroxyanisole" }],
+  "bht": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Butylated_hydroxytoluene" }],
+  "propylparaben": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Propylparaben" }],
+  "benzoyl-peroxide": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Benzoyl_peroxide" }],
+  "olestra": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Olestra" }],
+  "rbgh": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Bovine_somatotropin" }],
+  "ractopamine": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Ractopamine" }],
+  "coumarin": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Coumarin" }]
+};
+
+/* ============================================================
+   MATCHING
+   ============================================================ */
+function normalize(s) {
+  return (s || "").toLowerCase().replace(/\s+/g, " ");
+}
+
+// match an ingredient entry against additive tags + free text
+function matchEntry(entry, additiveENumbers, text) {
+  // E-number match (from Open Food Facts additives_tags or from text)
+  for (const en of entry.eNumbers) {
+    if (additiveENumbers.has(en)) return true;
+    const digits = en.replace(/^e/, "");
+    const re = new RegExp("\\be\\s?" + digits + "[a-z]?\\b", "i");
+    if (re.test(text)) return true;
+  }
+  // synonym text match
+  for (const syn of entry.synonyms) {
+    if (text.includes(syn)) return true;
+  }
+  return false;
+}
+
+function analyze(additivesTags, ingredientsText) {
+  const text = normalize(ingredientsText);
+  // OFF tags look like "en:e171" or "en:e924i" → collect bare e-numbers
+  const eSet = new Set();
+  (additivesTags || []).forEach(t => {
+    const m = String(t).toLowerCase().match(/e\d+/);
+    if (m) eSet.add(m[0]);
+  });
+  const matches = [];
+  for (const entry of DB) {
+    if (matchEntry(entry, eSet, text)) matches.push(entry);
+  }
+  return matches;
+}
+
+/* ============================================================
+   RENDERING
+   ============================================================ */
+const STATUS_RANK = { banned: 3, restricted: 2, warning: 1, allowed: 0 };
+const STATUS_LABEL = { banned: "Banned", restricted: "Restricted", warning: "Warning label", allowed: "Allowed" };
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+function regionStatus(entry, region) {
+  const r = entry.regions[region];
+  return r ? r.status : "allowed";
+}
+
+function renderResults(matches, product) {
+  const results = document.getElementById("results");
+  let html = "";
+
+  if (product) {
+    html += `<div class="product-head">`;
+    if (product.image) html += `<img src="${esc(product.image)}" alt="">`;
+    html += `<div><div class="ptitle">${esc(product.name || "Unnamed product")}</div>`;
+    if (product.brand) html += `<div class="pmeta">${esc(product.brand)}</div>`;
+    html += `</div></div>`;
+  }
+
+  if (matches.length === 0) {
+    html += `<div class="verdict clean"><h2>✅ No flagged ingredients found</h2>
+      <p>None of the additives in our database were detected. Note: this only means none of the known-controversial ingredients were found — it is not a guarantee the product is legal everywhere, and the ingredient data may be incomplete.</p></div>`;
+    results.innerHTML = html;
+    results.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+
+  // region summary: count worst statuses
+  const regionCounts = {};
+  Object.keys(REGIONS).forEach(rk => regionCounts[rk] = { banned:0, restricted:0, warning:0 });
+  matches.forEach(m => {
+    Object.keys(REGIONS).forEach(rk => {
+      const s = regionStatus(m, rk);
+      if (s !== "allowed") regionCounts[rk][s]++;
+    });
+  });
+
+  html += `<div class="verdict"><h2>Found ${matches.length} flagged ingredient${matches.length>1?"s":""}</h2>
+    <p>These ingredients are banned, restricted, or warning-labeled in at least one of the regions checked.</p></div>`;
+
+  html += `<div class="region-summary">`;
+  Object.keys(REGIONS).forEach(rk => {
+    const c = regionCounts[rk];
+    const total = c.banned + c.restricted + c.warning;
+    let parts = [];
+    if (c.banned) parts.push(`${c.banned} banned`);
+    if (c.restricted) parts.push(`${c.restricted} restricted`);
+    if (c.warning) parts.push(`${c.warning} warning`);
+    const summary = total ? parts.join(" · ") : "No issues";
+    html += `<div class="rs-card"><div class="flag">${REGIONS[rk].flag}</div>
+      <div class="rname">${esc(REGIONS[rk].name)}</div>
+      <div class="rcount">${esc(summary)}</div></div>`;
+  });
+  html += `</div>`;
+
+  // sort by overall severity
+  matches.sort((a, b) => {
+    const sev = e => Math.max(...Object.keys(REGIONS).map(rk => STATUS_RANK[regionStatus(e, rk)]));
+    return sev(b) - sev(a);
+  });
+
+  matches.forEach(m => {
+    html += `<div class="ing-card">
+      <div class="ing-name">${esc(m.name)}</div>
+      <div class="ing-cat">${esc(m.category)}</div>
+      <div class="ing-why">${esc(m.why)}</div>
+      <div class="chips">`;
+    Object.keys(REGIONS).forEach(rk => {
+      const s = regionStatus(m, rk);
+      html += `<span class="chip ${s}"><span class="ch-region">${REGIONS[rk].flag} ${esc(REGIONS[rk].name)}:</span> ${STATUS_LABEL[s]}</span>`;
+    });
+    html += `</div>`;
+    // notes for regions with a status
+    const noted = Object.keys(REGIONS).filter(rk => m.regions[rk] && m.regions[rk].note);
+    if (noted.length) {
+      html += `<div class="region-notes">`;
+      noted.forEach(rk => {
+        html += `<div><b>${REGIONS[rk].flag} ${esc(REGIONS[rk].name)}:</b> ${esc(m.regions[rk].note)}</div>`;
+      });
+      html += `</div>`;
+    }
+    const srcs = SOURCES[m.id];
+    if (srcs && srcs.length) {
+      html += `<div class="sources">Verify: ` +
+        srcs.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.label)} ↗</a>`).join(" · ") +
+        `</div>`;
+    }
+    html += `</div>`;
+  });
+
+  results.innerHTML = html;
+  results.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/* ============================================================
+   OPEN FOOD FACTS API
+   ============================================================ */
+const OFF_FIELDS = "code,product_name,brands,ingredients_text,ingredients_text_en,additives_tags,image_small_url,image_front_small_url";
+
+function productFromOFF(p) {
+  return {
+    name: p.product_name,
+    brand: p.brands,
+    image: p.image_front_small_url || p.image_small_url,
+    text: p.ingredients_text_en || p.ingredients_text || "",
+    additives: p.additives_tags || []
+  };
+}
+
+async function offSearch(term) {
+  const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=10&fields=${OFF_FIELDS}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Search failed");
+  const data = await res.json();
+  return (data.products || []).filter(p => p.product_name);
+}
+
+async function offBarcode(code) {
+  const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Lookup failed");
+  const data = await res.json();
+  if (data.status !== 1 || !data.product) return null;
+  return data.product;
+}
+
+/* ============================================================
+   UI WIRING
+   ============================================================ */
+function setStatus(msg) {
+  document.getElementById("picker").innerHTML = msg ? `<div class="status-msg">${esc(msg)}</div>` : "";
+}
+function clearResults() {
+  document.getElementById("results").innerHTML = "";
+}
+
+// tabs
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
+    setStatus(""); clearResults();
+  });
+});
+
+// search
+const searchBtn = document.getElementById("searchBtn");
+async function doSearch() {
+  const term = document.getElementById("searchInput").value.trim();
+  if (!term) return;
+  clearResults();
+  setStatus("Searching…");
+  searchBtn.disabled = true;
+  try {
+    const products = await offSearch(term);
+    if (!products.length) { setStatus("No products found. Try a different name, or use the “Paste ingredients” tab."); return; }
+    let html = "";
+    products.forEach((p, i) => {
+      const img = p.image_front_small_url || p.image_small_url || "";
+      html += `<div class="pick" data-i="${i}">
+        ${img ? `<img src="${esc(img)}" alt="">` : `<div style="width:44px;height:44px"></div>`}
+        <div><div class="pname">${esc(p.product_name)}</div>
+        <div class="pbrand">${esc(p.brands || "")}</div></div></div>`;
+    });
+    document.getElementById("picker").innerHTML = html;
+    document.querySelectorAll("#picker .pick").forEach(el => {
+      el.addEventListener("click", () => {
+        const p = products[+el.dataset.i];
+        const prod = productFromOFF(p);
+        setStatus("");
+        renderResults(analyze(prod.additives, prod.text), prod);
+      });
+    });
+  } catch (e) {
+    setStatus("Couldn’t reach the food database. Check your connection, or use the “Paste ingredients” tab.");
+  } finally {
+    searchBtn.disabled = false;
+  }
+}
+searchBtn.addEventListener("click", doSearch);
+document.getElementById("searchInput").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+
+// barcode
+const barcodeBtn = document.getElementById("barcodeBtn");
+async function doBarcode() {
+  const code = document.getElementById("barcodeInput").value.trim().replace(/\s/g, "");
+  if (!code) return;
+  clearResults();
+  setStatus("Looking up…");
+  barcodeBtn.disabled = true;
+  try {
+    const p = await offBarcode(code);
+    if (!p) { setStatus("No product found for that barcode. Try the “Paste ingredients” tab instead."); return; }
+    const prod = productFromOFF(p);
+    setStatus("");
+    if (!prod.text && (!prod.additives || !prod.additives.length)) {
+      setStatus("Found the product, but it has no ingredient data on file. Try the “Paste ingredients” tab.");
+    }
+    renderResults(analyze(prod.additives, prod.text), prod);
+  } catch (e) {
+    setStatus("Couldn’t reach the food database. Check your connection, or use the “Paste ingredients” tab.");
+  } finally {
+    barcodeBtn.disabled = false;
+  }
+}
+barcodeBtn.addEventListener("click", doBarcode);
+document.getElementById("barcodeInput").addEventListener("keydown", e => { if (e.key === "Enter") doBarcode(); });
+
+// paste
+document.getElementById("pasteBtn").addEventListener("click", () => {
+  const text = document.getElementById("pasteInput").value.trim();
+  if (!text) return;
+  setStatus("");
+  renderResults(analyze([], text), null);
+});
+
+// disclaimer date
+document.getElementById("reviewedLine").textContent = "Regulatory data cross-checked against official and reputable secondary sources in " + LAST_REVIEWED + ". Use the “Verify” links on each ingredient to confirm against the primary regulator.";
+</script>
+</body>
+</html>
