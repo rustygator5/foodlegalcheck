@@ -121,6 +121,28 @@
   .region-notes { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
   .region-notes div { font-size: 0.83rem; color: var(--muted); margin-bottom: 4px; }
   .region-notes b { color: var(--text); }
+
+  .score-card { background: var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:var(--shadow); }
+  .score-top { display:flex; align-items:center; gap:14px; margin-bottom:12px; }
+  .score-circle { width:74px; height:74px; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center; flex-shrink:0; border:3px solid var(--border); }
+  .score-circle.ok { border-color:var(--ok); color:var(--ok); }
+  .score-circle.warning { border-color:var(--warning); color:var(--warning); }
+  .score-circle.restricted { border-color:var(--restricted); color:var(--restricted); }
+  .score-circle.banned { border-color:var(--banned); color:var(--banned); }
+  .score-num { font-size:24px; font-weight:700; line-height:1; }
+  .score-den { font-size:11px; opacity:0.8; }
+  .score-grade { font-weight:700; font-size:1rem; }
+  .score-sub { font-size:0.8rem; color:var(--muted); margin-top:2px; }
+  .score-row { display:flex; align-items:center; gap:10px; margin:8px 0; }
+  .score-lbl { font-size:0.82rem; color:var(--muted); width:92px; }
+  .score-track { flex:1; height:8px; background:var(--bg); border-radius:999px; overflow:hidden; }
+  .score-fill { height:100%; border-radius:999px; background:var(--muted); }
+  .score-fill.ok { background:var(--ok); }
+  .score-fill.warning { background:var(--warning); }
+  .score-fill.banned { background:var(--banned); }
+  .score-pts { font-size:0.82rem; width:54px; text-align:right; }
+  .score-pts.muted { color:var(--muted); }
+  .score-foot { font-size:0.75rem; color:var(--muted); margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
   .sources { margin-top: 10px; font-size: 0.8rem; color: var(--muted); }
   .sources a { color: var(--accent); text-decoration: none; }
   .sources a:hover { text-decoration: underline; }
@@ -620,6 +642,121 @@ function regionStatus(entry, region) {
   return r ? r.status : "allowed";
 }
 
+/* ---- health score: 45 nutrition / 25 processing / 30 additives ---- */
+const SCORE_W = { nutrition: 45, processing: 25, additives: 30 };
+const NUTRI_FRAC = { a: 1.0, b: 0.78, c: 0.55, d: 0.30, e: 0.08 };
+const NOVA_FRAC = { 1: 1.0, 2: 0.75, 3: 0.45, 4: 0.10 };
+const ADD_PENALTY = { banned: 8, restricted: 5, warning: 3, allowed: 0 };
+
+function worstStatus(entry) {
+  let worst = "allowed";
+  Object.keys(REGIONS).forEach(rk => {
+    const s = regionStatus(entry, rk);
+    if (STATUS_RANK[s] > STATUS_RANK[worst]) worst = s;
+  });
+  return worst;
+}
+
+function numVal(v) {
+  if (typeof v === "number") return v;
+  if (v == null) return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+
+// rough Nutri-Score-style fallback from per-100g nutriments (0 worst .. 1 best)
+function nutritionFromNutriments(n) {
+  if (!n) return null;
+  let energy = numVal(n["energy-kcal_100g"]);
+  if (energy == null && numVal(n["energy_100g"]) != null) energy = numVal(n["energy_100g"]) / 4.184;
+  const sugars = numVal(n["sugars_100g"]);
+  const satfat = numVal(n["saturated-fat_100g"]);
+  let salt = numVal(n["salt_100g"]);
+  const sodium = numVal(n["sodium_100g"]);
+  if (salt == null && sodium != null) salt = sodium * 2.5;
+  const fiber = numVal(n["fiber_100g"]);
+  const protein = numVal(n["proteins_100g"]);
+  if ([energy, sugars, satfat, salt].every(v => v == null)) return null;
+  let bad = 0, good = 0;
+  if (energy != null) bad += Math.min(10, energy / 335 * 10);
+  if (sugars != null) bad += Math.min(10, sugars / 45 * 10);
+  if (satfat != null) bad += Math.min(10, satfat / 10 * 10);
+  if (salt != null) bad += Math.min(10, salt / 2.3 * 10);
+  if (fiber != null) good += Math.min(5, fiber / 4.7 * 5);
+  if (protein != null) good += Math.min(5, protein / 16 * 5);
+  return Math.max(0, Math.min(1, 1 - (bad - good) / 40));
+}
+
+function computeScore(product, matches) {
+  if (!product) return null;
+
+  let nutrFrac = null;
+  const grade = (product.nutriscoreGrade || "").toLowerCase();
+  if (NUTRI_FRAC[grade] != null) nutrFrac = NUTRI_FRAC[grade];
+  else nutrFrac = nutritionFromNutriments(product.nutriments);
+
+  const nova = parseInt(product.novaGroup, 10);
+  const procFrac = NOVA_FRAC[nova] != null ? NOVA_FRAC[nova] : null;
+
+  let penalty = 0;
+  matches.forEach(m => { penalty += ADD_PENALTY[worstStatus(m)] || 0; });
+  if (product.additivesCount != null) penalty += Math.max(0, product.additivesCount - 2) * 1.5;
+  const addFrac = Math.max(0, SCORE_W.additives - penalty) / SCORE_W.additives;
+
+  // need at least one "core" component (nutrition or processing) to show a score
+  if (nutrFrac == null && procFrac == null) return null;
+
+  const comps = [
+    { key: "Nutrition", frac: nutrFrac, w: SCORE_W.nutrition },
+    { key: "Processing", frac: procFrac, w: SCORE_W.processing },
+    { key: "Additives", frac: addFrac, w: SCORE_W.additives }
+  ];
+  const present = comps.filter(c => c.frac != null);
+  // when all components are present, the headline equals the sum of the displayed
+  // points (so the bars add up); otherwise rescale across what's available.
+  let score;
+  if (present.length === comps.length) {
+    score = comps.reduce((s, c) => s + Math.round(c.frac * c.w), 0);
+  } else {
+    const wsum = present.reduce((s, c) => s + c.w, 0);
+    score = Math.round(present.reduce((s, c) => s + c.frac * c.w, 0) / wsum * 100);
+  }
+
+  let g, label, col;
+  if (score >= 80) { g = "A"; label = "Excellent"; col = "ok"; }
+  else if (score >= 60) { g = "B"; label = "Good"; col = "ok"; }
+  else if (score >= 40) { g = "C"; label = "Fair"; col = "warning"; }
+  else if (score >= 20) { g = "D"; label = "Poor"; col = "restricted"; }
+  else { g = "E"; label = "Bad"; col = "banned"; }
+
+  return { score, grade: g, label, col, comps, rescaled: present.length < comps.length };
+}
+
+function renderScoreCard(s) {
+  const barColor = f => f >= 0.66 ? "ok" : (f >= 0.33 ? "warning" : "banned");
+  let html = `<div class="score-card">
+    <div class="score-top">
+      <div class="score-circle ${s.col}"><span class="score-num">${s.score}</span><span class="score-den">/100</span></div>
+      <div class="score-meta">
+        <div class="score-grade">Health score — ${s.grade} · ${esc(s.label)}</div>
+        <div class="score-sub">Estimated from Open Food Facts data${s.rescaled ? " · rescaled (some data missing)" : ""}</div>
+      </div>
+    </div>`;
+  s.comps.forEach(c => {
+    if (c.frac == null) {
+      html += `<div class="score-row"><span class="score-lbl">${c.key}</span>
+        <div class="score-track"><div class="score-fill" style="width:0%"></div></div>
+        <span class="score-pts muted">no data</span></div>`;
+    } else {
+      html += `<div class="score-row"><span class="score-lbl">${c.key}</span>
+        <div class="score-track"><div class="score-fill ${barColor(c.frac)}" style="width:${Math.round(c.frac * 100)}%"></div></div>
+        <span class="score-pts">${Math.round(c.frac * c.w)} / ${c.w}</span></div>`;
+    }
+  });
+  html += `<div class="score-foot">Weights: Nutrition 45 · Processing 25 · Additives 30. Informational only, not medical advice.</div></div>`;
+  return html;
+}
+
 function renderResults(matches, product) {
   const results = document.getElementById("results");
   let html = "";
@@ -631,6 +768,9 @@ function renderResults(matches, product) {
     if (product.brand) html += `<div class="pmeta">${esc(product.brand)}</div>`;
     html += `</div></div>`;
   }
+
+  const scoreObj = computeScore(product, matches);
+  if (scoreObj) html += renderScoreCard(scoreObj);
 
   if (matches.length === 0) {
     html += `<div class="verdict clean"><h2>✅ No flagged ingredients found</h2>
@@ -710,7 +850,7 @@ function renderResults(matches, product) {
 /* ============================================================
    OPEN FOOD FACTS API
    ============================================================ */
-const OFF_FIELDS = "code,product_name,brands,ingredients_text,ingredients_text_en,additives_tags,image_small_url,image_front_small_url";
+const OFF_FIELDS = "code,product_name,brands,ingredients_text,ingredients_text_en,additives_tags,image_small_url,image_front_small_url,nutriscore_grade,nova_group,nutriments";
 
 function productFromOFF(p) {
   return {
@@ -718,7 +858,11 @@ function productFromOFF(p) {
     brand: p.brands,
     image: p.image_front_small_url || p.image_small_url,
     text: p.ingredients_text_en || p.ingredients_text || "",
-    additives: p.additives_tags || []
+    additives: p.additives_tags || [],
+    additivesCount: Array.isArray(p.additives_tags) ? p.additives_tags.length : null,
+    nutriscoreGrade: p.nutriscore_grade || null,
+    novaGroup: p.nova_group != null ? p.nova_group : null,
+    nutriments: p.nutriments || null
   };
 }
 
