@@ -129,7 +129,16 @@
   details.disclaimer summary { cursor: pointer; font-weight: 600; }
   details.disclaimer p { margin: 8px 0 0; }
   .footer-note { text-align:center; font-size:0.78rem; color:var(--muted); margin-top:24px; }
+
+  /* camera scanner */
+  .scan-btn { width:100%; margin-top:6px; background:var(--accent-soft); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  .scan-btn:hover { filter:none; background:color-mix(in srgb, var(--accent) 14%, transparent); }
+  #scanArea { display:none; margin-top:12px; }
+  #scanner { width:100%; max-width:420px; margin:0 auto; border-radius:12px; overflow:hidden; background:#000; line-height:0; }
+  #scanner video { width:100% !important; height:auto !important; display:block; }
+  #stopScanBtn { display:block; margin:10px auto 0; padding:10px 18px; border-radius:10px; border:none; background:var(--banned); color:#fff; font-size:0.95rem; font-weight:600; cursor:pointer; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -157,7 +166,12 @@
       <input type="text" id="barcodeInput" placeholder="Enter barcode digits, e.g. 0049000028911" inputmode="numeric" autocomplete="off">
       <button class="go" id="barcodeBtn">Look up</button>
     </div>
-    <p class="hint">Type the numbers under the barcode on the package.</p>
+    <button class="go scan-btn" id="scanBtn" type="button">📷 Scan with camera</button>
+    <div id="scanArea">
+      <div id="scanner"></div>
+      <button id="stopScanBtn" type="button">■ Stop scanning</button>
+    </div>
+    <p class="hint" id="scanMsg">Type the numbers under the barcode, or scan it with your phone’s camera.</p>
   </div>
 
   <div class="panel" id="panel-paste">
@@ -632,6 +646,7 @@ document.querySelectorAll(".tab").forEach(tab => {
     tab.classList.add("active");
     document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
     setStatus(""); clearResults();
+    if (typeof stopScanner === "function") stopScanner();
   });
 });
 
@@ -674,15 +689,15 @@ document.getElementById("searchInput").addEventListener("keydown", e => { if (e.
 
 // barcode
 const barcodeBtn = document.getElementById("barcodeBtn");
-async function doBarcode() {
-  const code = document.getElementById("barcodeInput").value.trim().replace(/\s/g, "");
+async function lookupBarcode(rawCode) {
+  const code = String(rawCode || "").trim().replace(/\s/g, "");
   if (!code) return;
   clearResults();
   setStatus("Looking up…");
   barcodeBtn.disabled = true;
   try {
     const p = await offBarcode(code);
-    if (!p) { setStatus("No product found for that barcode. Try the “Paste ingredients” tab instead."); return; }
+    if (!p) { setStatus("No product found for barcode " + code + ". Try the “Paste ingredients” tab instead."); return; }
     const prod = productFromOFF(p);
     setStatus("");
     if (!prod.text && (!prod.additives || !prod.additives.length)) {
@@ -695,8 +710,81 @@ async function doBarcode() {
     barcodeBtn.disabled = false;
   }
 }
+function doBarcode() { lookupBarcode(document.getElementById("barcodeInput").value); }
 barcodeBtn.addEventListener("click", doBarcode);
 document.getElementById("barcodeInput").addEventListener("keydown", e => { if (e.key === "Enter") doBarcode(); });
+
+// camera scanner (html5-qrcode)
+const scanBtn = document.getElementById("scanBtn");
+const stopScanBtn = document.getElementById("stopScanBtn");
+const scanArea = document.getElementById("scanArea");
+const scanMsg = document.getElementById("scanMsg");
+let scanner = null;
+
+function setScanMsg(msg) { scanMsg.textContent = msg; }
+function showScannerUI(on) {
+  scanArea.style.display = on ? "block" : "none";
+  scanBtn.style.display = on ? "none" : "block";
+}
+
+async function startScanner() {
+  if (!window.isSecureContext) { setScanMsg("Camera access needs a secure (https) connection — it works on the live site."); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setScanMsg("This browser or device doesn’t support camera access. Type the barcode instead."); return; }
+  if (typeof Html5Qrcode === "undefined") { setScanMsg("Scanner couldn’t load (check your connection). Type the barcode instead."); return; }
+
+  showScannerUI(true);
+  setScanMsg("Point your camera at the barcode…");
+
+  const formats = [
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION
+  ];
+  scanner = new Html5Qrcode("scanner", { formatsToSupport: formats, verbose: false });
+
+  const config = {
+    fps: 10,
+    qrbox: (vw, vh) => ({
+      width: Math.min(320, Math.floor(vw * 0.85)),
+      height: Math.min(170, Math.floor(vh * 0.55))
+    })
+  };
+
+  try {
+    await scanner.start({ facingMode: "environment" }, config, onScan, () => {});
+  } catch (err) {
+    await stopScanner();
+    const name = err && (err.name || "");
+    if (name === "NotAllowedError" || /permission|denied/i.test(String(err))) {
+      setScanMsg("Camera permission was blocked. Allow camera access in your browser, then try again.");
+    } else if (name === "NotFoundError" || /no camera|requested device/i.test(String(err))) {
+      setScanMsg("No camera found on this device. Type the barcode instead.");
+    } else {
+      setScanMsg("Couldn’t start the camera. Type the barcode instead.");
+    }
+  }
+}
+
+async function stopScanner() {
+  if (scanner) {
+    try { await scanner.stop(); } catch (e) {}
+    try { scanner.clear(); } catch (e) {}
+    scanner = null;
+  }
+  showScannerUI(false);
+}
+
+function onScan(decodedText) {
+  document.getElementById("barcodeInput").value = decodedText;
+  setScanMsg("Scanned: " + decodedText);
+  stopScanner();
+  lookupBarcode(decodedText);
+}
+
+scanBtn.addEventListener("click", startScanner);
+stopScanBtn.addEventListener("click", () => { stopScanner(); setScanMsg("Scanning stopped."); });
 
 // paste
 document.getElementById("pasteBtn").addEventListener("click", () => {
