@@ -399,11 +399,11 @@ const DB = [
   },
   {
     id: "benzoyl-peroxide",
-    name: "Benzoyl peroxide (flour bleach)",
-    eNumbers: ["e928"],
-    synonyms: ["benzoyl peroxide", "bleached flour"],
+    name: "Benzoyl peroxide / chlorine dioxide (flour bleach)",
+    eNumbers: ["e928", "e926"],
+    synonyms: ["benzoyl peroxide", "chlorine dioxide", "bleached flour"],
     category: "Flour bleaching agent",
-    why: "Used to artificially whiten flour; flour bleaching agents are not permitted in the EU/UK.",
+    why: "Used to artificially whiten flour; flour bleaching agents (benzoyl peroxide, chlorine dioxide) are not permitted in the EU/UK.",
     regions: {
       EU: { status: "banned", note: "Flour bleaching agents are not permitted." },
       UK: { status: "banned", note: "Flour bleaching agents are not permitted." }
@@ -461,6 +461,79 @@ const DB = [
       EU: { status: "restricted", note: "Cannot be added directly; strict maximum levels in cinnamon-containing foods (5–50 mg/kg)." },
       UK: { status: "restricted", note: "Strict maximum levels apply." }
     }
+  },
+  {
+    id: "nitrites",
+    name: "Sodium nitrite / nitrate",
+    eNumbers: ["e249", "e250", "e251", "e252"],
+    synonyms: ["sodium nitrite", "potassium nitrite", "sodium nitrate", "potassium nitrate"],
+    category: "Curing preservative (bacon, hot dogs, deli & cured meats)",
+    why: "Can form carcinogenic nitrosamines during curing/cooking. Permitted everywhere, but the EU caps it well below U.S. levels to limit nitrosamine formation.",
+    regions: {
+      EU: { status: "restricted", note: "Permitted, but added and residual limits are lower than the U.S. and were cut further from Oct 2025 (e.g. 80 mg/kg vs ~156 ppm in the U.S.)." },
+      UK: { status: "restricted", note: "Permitted with limits (retained EU-era rules)." }
+    }
+  },
+  {
+    id: "carrageenan",
+    name: "Carrageenan",
+    eNumbers: ["e407"],
+    synonyms: ["carrageenan", "processed eucheuma seaweed"],
+    category: "Thickener / stabilizer (dairy & plant milks, deli meats, desserts)",
+    why: "Degraded carrageenan has caused gut inflammation in animal studies; the EU bars it from infant food as a precaution.",
+    regions: {
+      EU: { status: "restricted", note: "Allowed in general foods, but not permitted in infant formula or foods for infants under 12 weeks." },
+      UK: { status: "restricted", note: "Same infant-food restriction (retained EU rules)." }
+    }
+  },
+  {
+    id: "aluminium-additives",
+    name: "Aluminium-based additives (e.g. sodium aluminium phosphate)",
+    eNumbers: ["e520", "e521", "e522", "e523", "e541"],
+    synonyms: ["sodium aluminum phosphate", "sodium aluminium phosphate", "aluminum sulfate", "aluminium sulphate", "sodium aluminum sulfate", "sodium aluminium sulphate"],
+    category: "Leavening / firming / stabilizing agents (baking powder, processed cheese)",
+    why: "Aluminium can accumulate in the body (bone and neurological concerns). The EU sharply cut the permitted levels and uses of aluminium additives.",
+    regions: {
+      EU: { status: "restricted", note: "Heavily restricted since 2014 — e.g. sodium aluminium phosphate is allowed only in fine bakery wares at reduced levels." },
+      UK: { status: "restricted", note: "Same reduced limits (retained EU rules)." }
+    }
+  },
+  {
+    id: "ethoxyquin",
+    name: "Ethoxyquin",
+    eNumbers: [],
+    synonyms: ["ethoxyquin"],
+    category: "Preservative / antioxidant (U.S.: chili powder, paprika; fruit anti-scald)",
+    why: "An antioxidant the EU could not confirm as safe. The U.S. still allows it in spices such as chili powder and paprika, and to treat apples and pears.",
+    regions: {
+      EU: { status: "restricted", note: "Not permitted as a general food additive (only very narrow uses); banned as an animal-feed additive (2017–2022)." },
+      UK: { status: "restricted", note: "Not permitted for general food use." },
+      AU: { status: "banned", note: "Not permitted as a food additive." }
+    }
+  },
+  {
+    id: "potassium-iodate",
+    name: "Potassium iodate",
+    eNumbers: ["e917"],
+    synonyms: ["potassium iodate", "calcium iodate"],
+    category: "Flour treatment agent / dough conditioner",
+    why: "A dough strengthener similar to potassium bromate; the WHO has warned against its use in flour since 1965. Not authorised abroad.",
+    regions: {
+      EU: { status: "banned", note: "Not authorised as a food additive." },
+      UK: { status: "banned", note: "Not authorised as a food additive." }
+    }
+  },
+  {
+    id: "citrus-red-2",
+    name: "Citrus Red 2",
+    eNumbers: [],
+    synonyms: ["citrus red 2", "citrus red no. 2", "citrus red no 2"],
+    category: "Synthetic color (U.S.: dyeing the skins of some oranges)",
+    why: "Classified a possible carcinogen (IARC Group 2B). In the U.S. it may be used to color orange peels; not authorised abroad.",
+    regions: {
+      EU: { status: "banned", note: "Not authorised as a food colour." },
+      UK: { status: "banned", note: "Not authorised as a food colour." }
+    }
   }
 ];
 
@@ -485,7 +558,13 @@ const SOURCES = {
   "olestra": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Olestra" }],
   "rbgh": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Bovine_somatotropin" }],
   "ractopamine": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Ractopamine" }],
-  "coumarin": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Coumarin" }]
+  "coumarin": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Coumarin" }],
+  "nitrites": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Sodium_nitrite" }],
+  "carrageenan": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Carrageenan" }],
+  "aluminium-additives": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Sodium_aluminium_phosphate" }],
+  "ethoxyquin": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Ethoxyquin" }],
+  "potassium-iodate": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Potassium_iodate" }],
+  "citrus-red-2": [{ label: "Wikipedia", url: "https://en.wikipedia.org/wiki/Citrus_Red_2" }]
 };
 
 /* ============================================================
