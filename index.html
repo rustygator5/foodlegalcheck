@@ -137,8 +137,33 @@
   #scanner { width:100%; max-width:420px; margin:0 auto; border-radius:12px; overflow:hidden; background:#000; line-height:0; }
   #scanner video { width:100% !important; height:auto !important; display:block; }
   #stopScanBtn { display:block; margin:10px auto 0; padding:10px 18px; border-radius:10px; border:none; background:var(--banned); color:#fff; font-size:0.95rem; font-weight:600; cursor:pointer; }
+  #scanControls { display:flex; align-items:center; justify-content:center; gap:14px; margin-top:10px; flex-wrap:wrap; }
+  #zoomWrap { display:none; align-items:center; gap:8px; }
+  #zoomWrap .zlabel { font-size:0.8rem; color:var(--muted); }
+  #zoomSlider { width:170px; max-width:55vw; }
+  #torchBtn { display:none; padding:8px 14px; border-radius:10px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.9rem; font-weight:600; cursor:pointer; }
+  #torchBtn.on { background:var(--warning-bg); color:var(--warning); border-color:color-mix(in srgb, var(--warning) 40%, transparent); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script type="module">
+  /* Fast WebAssembly barcode decoder (compiled ZXing-C++).
+     iOS Safari has no native BarcodeDetector, so this ponyfills one that
+     html5-qrcode will use instead of its slower built-in JS decoder.
+     If it can't load, we silently keep the built-in decoder (no regression). */
+  window.__barcodeEngineReady = (async () => {
+    if ("BarcodeDetector" in window) return "native";          // e.g. Android Chrome
+    try {
+      const mod = await import("https://esm.sh/barcode-detector@2/pure");
+      const BD = mod.BarcodeDetector;
+      const fmts = await BD.getSupportedFormats();              // forces the WASM to load
+      if (fmts && fmts.includes("ean_13")) {
+        window.BarcodeDetector = BD;
+        return "wasm";
+      }
+    } catch (e) { /* fall back to built-in decoder */ }
+    return "builtin";
+  })();
+</script>
 </head>
 <body>
 <div class="wrap">
@@ -169,6 +194,13 @@
     <button class="go scan-btn" id="scanBtn" type="button">📷 Scan with camera</button>
     <div id="scanArea">
       <div id="scanner"></div>
+      <div id="scanControls">
+        <div id="zoomWrap">
+          <span class="zlabel">Zoom</span>
+          <input type="range" id="zoomSlider" min="1" max="5" step="0.1" value="1">
+        </div>
+        <button id="torchBtn" type="button">🔦 Light</button>
+      </div>
       <button id="stopScanBtn" type="button">■ Stop scanning</button>
     </div>
     <p class="hint" id="scanMsg">Type the numbers under the barcode, or scan it with your phone’s camera.</p>
@@ -714,18 +746,68 @@ function doBarcode() { lookupBarcode(document.getElementById("barcodeInput").val
 barcodeBtn.addEventListener("click", doBarcode);
 document.getElementById("barcodeInput").addEventListener("keydown", e => { if (e.key === "Enter") doBarcode(); });
 
-// camera scanner (html5-qrcode)
+// camera scanner (html5-qrcode + fast WASM/native BarcodeDetector when available)
 const scanBtn = document.getElementById("scanBtn");
 const stopScanBtn = document.getElementById("stopScanBtn");
 const scanArea = document.getElementById("scanArea");
 const scanMsg = document.getElementById("scanMsg");
+const zoomWrap = document.getElementById("zoomWrap");
+const zoomSlider = document.getElementById("zoomSlider");
+const torchBtn = document.getElementById("torchBtn");
 let scanner = null;
+let torchOn = false;
 
 function setScanMsg(msg) { scanMsg.textContent = msg; }
 function showScannerUI(on) {
   scanArea.style.display = on ? "block" : "none";
   scanBtn.style.display = on ? "none" : "block";
+  if (!on) {
+    zoomWrap.style.display = "none";
+    torchBtn.style.display = "none";
+    torchBtn.classList.remove("on");
+    torchOn = false;
+  }
 }
+
+const SCAN_FORMATS = () => [
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8,
+  Html5QrcodeSupportedFormats.UPC_A,
+  Html5QrcodeSupportedFormats.UPC_E,
+  Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION
+];
+const SCAN_CONFIG = {
+  fps: 15,
+  qrbox: (vw, vh) => ({
+    width: Math.min(380, Math.floor(vw * 0.9)),
+    height: Math.min(220, Math.floor(vh * 0.5))
+  })
+};
+
+// expose zoom + flashlight if the camera reports them (mainly Android; iOS often won't)
+function setupCameraControls() {
+  let caps = {};
+  try { caps = scanner.getRunningTrackCapabilities() || {}; } catch (e) {}
+  if (caps.zoom && typeof caps.zoom === "object" && caps.zoom.max > caps.zoom.min) {
+    zoomSlider.min = caps.zoom.min;
+    zoomSlider.max = caps.zoom.max;
+    zoomSlider.step = caps.zoom.step || 0.1;
+    zoomSlider.value = caps.zoom.min;
+    zoomWrap.style.display = "flex";
+  }
+  if (caps.torch) torchBtn.style.display = "inline-block";
+}
+
+zoomSlider.addEventListener("input", () => {
+  if (scanner) scanner.applyVideoConstraints({ advanced: [{ zoom: Number(zoomSlider.value) }] }).catch(() => {});
+});
+torchBtn.addEventListener("click", () => {
+  if (!scanner) return;
+  torchOn = !torchOn;
+  scanner.applyVideoConstraints({ advanced: [{ torch: torchOn }] })
+    .then(() => torchBtn.classList.toggle("on", torchOn))
+    .catch(() => {});
+});
 
 async function startScanner() {
   if (!window.isSecureContext) { setScanMsg("Camera access needs a secure (https) connection — it works on the live site."); return; }
@@ -733,30 +815,46 @@ async function startScanner() {
   if (typeof Html5Qrcode === "undefined") { setScanMsg("Scanner couldn’t load (check your connection). Type the barcode instead."); return; }
 
   showScannerUI(true);
-  setScanMsg("Point your camera at the barcode…");
+  setScanMsg("Loading scanner…");
 
-  const formats = [
-    Html5QrcodeSupportedFormats.EAN_13,
-    Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,
-    Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION
-  ];
-  scanner = new Html5Qrcode("scanner", { formatsToSupport: formats, verbose: false });
+  // wait briefly for the fast engine; fall back to the built-in decoder if it's slow
+  let engine = "builtin";
+  try {
+    engine = await Promise.race([
+      window.__barcodeEngineReady,
+      new Promise(res => setTimeout(() => res("builtin"), 5000))
+    ]);
+  } catch (e) {}
 
-  const config = {
-    fps: 10,
-    qrbox: (vw, vh) => ({
-      width: Math.min(320, Math.floor(vw * 0.85)),
-      height: Math.min(170, Math.floor(vh * 0.55))
-    })
+  scanner = new Html5Qrcode("scanner", {
+    formatsToSupport: SCAN_FORMATS(),
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    verbose: false
+  });
+
+  const videoConstraints = { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } };
+  const ready = () => {
+    setScanMsg(engine === "builtin"
+      ? "Fill the frame with the barcode and hold steady…"
+      : "Fast scanner on — fill the frame with the barcode.");
+    setupCameraControls();
   };
 
   try {
-    await scanner.start({ facingMode: "environment" }, config, onScan, () => {});
+    await scanner.start(videoConstraints, SCAN_CONFIG, onScan, () => {});
+    ready();
   } catch (err) {
-    await stopScanner();
     const name = err && (err.name || "");
+    if (name === "OverconstrainedError" || /overconstrained|constraint/i.test(String(err))) {
+      // retry with relaxed constraints (some cameras reject the HD request)
+      try {
+        scanner = new Html5Qrcode("scanner", { formatsToSupport: SCAN_FORMATS(), experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false });
+        await scanner.start({ facingMode: "environment" }, SCAN_CONFIG, onScan, () => {});
+        ready();
+        return;
+      } catch (e2) { /* fall through to message below */ }
+    }
+    await stopScanner();
     if (name === "NotAllowedError" || /permission|denied/i.test(String(err))) {
       setScanMsg("Camera permission was blocked. Allow camera access in your browser, then try again.");
     } else if (name === "NotFoundError" || /no camera|requested device/i.test(String(err))) {
