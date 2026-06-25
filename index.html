@@ -144,12 +144,12 @@
   #torchBtn { display:none; padding:8px 14px; border-radius:10px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.9rem; font-weight:600; cursor:pointer; }
   #torchBtn.on { background:var(--warning-bg); color:var(--warning); border-color:color-mix(in srgb, var(--warning) 40%, transparent); }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script type="module">
-  /* Fast WebAssembly barcode decoder (compiled ZXing-C++).
-     iOS Safari has no native BarcodeDetector, so this ponyfills one that
-     html5-qrcode will use instead of its slower built-in JS decoder.
-     If it can't load, we silently keep the built-in decoder (no regression). */
+  /* Barcode decoder engine. Uses the browser's native BarcodeDetector when present
+     (e.g. Android Chrome); otherwise loads a WASM ZXing-C++ ponyfill so iOS Safari
+     (which has no native BarcodeDetector) gets a fast, accurate decoder too.
+     If it can't load, the camera scanner shows a graceful message and manual entry
+     still works. __barcodeEngineReady resolves once the engine choice is settled. */
   window.__barcodeEngineReady = (async () => {
     if ("BarcodeDetector" in window) return "native";          // e.g. Android Chrome
     try {
@@ -160,8 +160,8 @@
         window.BarcodeDetector = BD;
         return "wasm";
       }
-    } catch (e) { /* fall back to built-in decoder */ }
-    return "builtin";
+    } catch (e) { /* no decoder available */ }
+    return "none";
   })();
 </script>
 </head>
@@ -746,15 +746,22 @@ function doBarcode() { lookupBarcode(document.getElementById("barcodeInput").val
 barcodeBtn.addEventListener("click", doBarcode);
 document.getElementById("barcodeInput").addEventListener("keydown", e => { if (e.key === "Enter") doBarcode(); });
 
-// camera scanner (html5-qrcode + fast WASM/native BarcodeDetector when available)
+// camera scanner — direct getUserMedia + BarcodeDetector (native, or WASM ponyfill on iOS)
 const scanBtn = document.getElementById("scanBtn");
 const stopScanBtn = document.getElementById("stopScanBtn");
 const scanArea = document.getElementById("scanArea");
 const scanMsg = document.getElementById("scanMsg");
+const scannerBox = document.getElementById("scanner");
 const zoomWrap = document.getElementById("zoomWrap");
 const zoomSlider = document.getElementById("zoomSlider");
 const torchBtn = document.getElementById("torchBtn");
-let scanner = null;
+
+const SCAN_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"];
+let mediaStream = null;   // active MediaStream
+let videoEl = null;       // <video> element
+let videoTrack = null;    // active video track (for zoom/torch)
+let detector = null;      // BarcodeDetector instance
+let scanLoopActive = false;
 let torchOn = false;
 
 function setScanMsg(msg) { scanMsg.textContent = msg; }
@@ -769,109 +776,116 @@ function showScannerUI(on) {
   }
 }
 
-const SCAN_FORMATS = () => [
-  Html5QrcodeSupportedFormats.EAN_13,
-  Html5QrcodeSupportedFormats.EAN_8,
-  Html5QrcodeSupportedFormats.UPC_A,
-  Html5QrcodeSupportedFormats.UPC_E,
-  Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION
-];
-const SCAN_CONFIG = {
-  fps: 15,
-  qrbox: (vw, vh) => ({
-    width: Math.min(380, Math.floor(vw * 0.9)),
-    height: Math.min(220, Math.floor(vh * 0.5))
-  })
-};
+function stopScanner() {
+  scanLoopActive = false;
+  detector = null;
+  if (videoEl) { try { videoEl.pause(); } catch (e) {} videoEl.srcObject = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
+  mediaStream = null; videoTrack = null; videoEl = null;
+  if (scannerBox) scannerBox.innerHTML = "";
+  showScannerUI(false);
+}
 
-// expose zoom + flashlight if the camera reports them (mainly Android; iOS often won't)
-function setupCameraControls() {
+function handleCamError(err) {
+  stopScanner();
+  const name = (err && err.name) || "";
+  if (name === "NotAllowedError" || /denied|permission|not allowed/i.test(String(err))) {
+    setScanMsg("Camera is blocked for this site. On iPhone: tap “aA” at the left of Safari’s address bar → Website Settings → Camera → Allow, then reload.");
+  } else if (name === "NotFoundError" || name === "OverconstrainedError" || /no camera|not found|requested device/i.test(String(err))) {
+    setScanMsg("No usable camera was found. Type the barcode instead.");
+  } else if (name === "NotReadableError" || /in use|could not start/i.test(String(err))) {
+    setScanMsg("The camera is busy in another app or tab. Close it, then try again.");
+  } else {
+    setScanMsg("Couldn’t start the camera (" + (name || "error") + "). Type the barcode instead.");
+  }
+}
+
+function setupTrackControls() {
   let caps = {};
-  try { caps = scanner.getRunningTrackCapabilities() || {}; } catch (e) {}
+  try { caps = (videoTrack && videoTrack.getCapabilities) ? videoTrack.getCapabilities() : {}; } catch (e) {}
   if (caps.zoom && typeof caps.zoom === "object" && caps.zoom.max > caps.zoom.min) {
     zoomSlider.min = caps.zoom.min;
     zoomSlider.max = caps.zoom.max;
     zoomSlider.step = caps.zoom.step || 0.1;
-    zoomSlider.value = caps.zoom.min;
+    zoomSlider.value = (caps.zoom.min + caps.zoom.max) / 2;   // start a bit zoomed in — helps focus
     zoomWrap.style.display = "flex";
+    try { videoTrack.applyConstraints({ advanced: [{ zoom: Number(zoomSlider.value) }] }); } catch (e) {}
   }
   if (caps.torch) torchBtn.style.display = "inline-block";
 }
 
 zoomSlider.addEventListener("input", () => {
-  if (scanner) scanner.applyVideoConstraints({ advanced: [{ zoom: Number(zoomSlider.value) }] }).catch(() => {});
+  if (videoTrack) { try { videoTrack.applyConstraints({ advanced: [{ zoom: Number(zoomSlider.value) }] }); } catch (e) {} }
 });
 torchBtn.addEventListener("click", () => {
-  if (!scanner) return;
+  if (!videoTrack) return;
   torchOn = !torchOn;
-  scanner.applyVideoConstraints({ advanced: [{ torch: torchOn }] })
+  videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] })
     .then(() => torchBtn.classList.toggle("on", torchOn))
     .catch(() => {});
 });
 
-async function startScanner() {
-  if (!window.isSecureContext) { setScanMsg("Camera access needs a secure (https) connection — it works on the live site."); return; }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setScanMsg("This browser or device doesn’t support camera access. Type the barcode instead."); return; }
-  if (typeof Html5Qrcode === "undefined") { setScanMsg("Scanner couldn’t load (check your connection). Type the barcode instead."); return; }
-
-  showScannerUI(true);
-  setScanMsg("Loading scanner…");
-
-  // wait briefly for the fast engine; fall back to the built-in decoder if it's slow
-  let engine = "builtin";
-  try {
-    engine = await Promise.race([
-      window.__barcodeEngineReady,
-      new Promise(res => setTimeout(() => res("builtin"), 5000))
-    ]);
-  } catch (e) {}
-
-  scanner = new Html5Qrcode("scanner", {
-    formatsToSupport: SCAN_FORMATS(),
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-    verbose: false
-  });
-
-  const videoConstraints = { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } };
-  const ready = () => {
-    setScanMsg(engine === "builtin"
-      ? "Fill the frame with the barcode and hold steady…"
-      : "Fast scanner on — fill the frame with the barcode.");
-    setupCameraControls();
-  };
-
-  try {
-    await scanner.start(videoConstraints, SCAN_CONFIG, onScan, () => {});
-    ready();
-  } catch (err) {
-    const name = err && (err.name || "");
-    if (name === "OverconstrainedError" || /overconstrained|constraint/i.test(String(err))) {
-      // retry with relaxed constraints (some cameras reject the HD request)
-      try {
-        scanner = new Html5Qrcode("scanner", { formatsToSupport: SCAN_FORMATS(), experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false });
-        await scanner.start({ facingMode: "environment" }, SCAN_CONFIG, onScan, () => {});
-        ready();
-        return;
-      } catch (e2) { /* fall through to message below */ }
-    }
-    await stopScanner();
-    if (name === "NotAllowedError" || /permission|denied/i.test(String(err))) {
-      setScanMsg("Camera permission was blocked. Allow camera access in your browser, then try again.");
-    } else if (name === "NotFoundError" || /no camera|requested device/i.test(String(err))) {
-      setScanMsg("No camera found on this device. Type the barcode instead.");
-    } else {
-      setScanMsg("Couldn’t start the camera. Type the barcode instead.");
-    }
+function detectTick() {
+  if (!scanLoopActive || !detector || !videoEl) return;
+  if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+    detector.detect(videoEl).then(codes => {
+      if (!scanLoopActive) return;
+      if (codes && codes.length && codes[0].rawValue) { onScan(codes[0].rawValue); return; }
+      setTimeout(detectTick, 90);
+    }).catch(() => { if (scanLoopActive) setTimeout(detectTick, 120); });
+  } else {
+    setTimeout(detectTick, 120);
   }
 }
 
-async function stopScanner() {
-  if (scanner) {
-    try { await scanner.stop(); } catch (e) {}
-    try { scanner.clear(); } catch (e) {}
-    scanner = null;
+async function startScanner() {
+  if (!window.isSecureContext) { setScanMsg("Camera access needs a secure (https) connection — it works on the live site."); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setScanMsg("This browser or device doesn’t support camera access. Type the barcode instead."); return; }
+
+  showScannerUI(true);
+  setScanMsg("Starting camera…");
+
+  // IMPORTANT (iOS): request the camera FIRST, with no awaits before it, so Safari
+  // keeps the tap's user-activation. Awaiting the decoder engine first breaks this.
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+  } catch (err) { handleCamError(err); return; }
+
+  videoTrack = mediaStream.getVideoTracks()[0] || null;
+
+  // build an inline video element (playsinline is essential on iOS)
+  scannerBox.innerHTML = "";
+  videoEl = document.createElement("video");
+  videoEl.setAttribute("playsinline", "");
+  videoEl.muted = true; videoEl.autoplay = true;
+  videoEl.style.cssText = "width:100%;height:auto;display:block;";
+  scannerBox.appendChild(videoEl);
+  videoEl.srcObject = mediaStream;
+  try { await videoEl.play(); } catch (e) {}
+
+  setupTrackControls();
+
+  // now it's safe to wait for the decoder engine (camera is already live)
+  try { await window.__barcodeEngineReady; } catch (e) {}
+  if (!("BarcodeDetector" in window)) {
+    stopScanner();
+    setScanMsg("Scanner engine couldn’t load. Check your connection, or type the barcode.");
+    return;
   }
-  showScannerUI(false);
+  try {
+    detector = new window.BarcodeDetector({ formats: SCAN_FORMATS });
+  } catch (e) {
+    stopScanner();
+    setScanMsg("Scanner engine error. Type the barcode instead.");
+    return;
+  }
+
+  setScanMsg("Point the camera at the barcode — fill the frame and hold steady.");
+  scanLoopActive = true;
+  detectTick();
 }
 
 function onScan(decodedText) {
