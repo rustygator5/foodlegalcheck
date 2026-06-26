@@ -1355,7 +1355,8 @@ receiptFile.addEventListener("change", async () => {
     setStatus("");
     renderReceipt(data);
   } catch (e) {
-    if (e.status === 401) setStatus("Your API key was rejected (401). Tap “Change key” and re-enter it.");
+    if (e.message && /credit balance|too low|insufficient|billing|quota/i.test(e.message)) setStatus("Your Anthropic API account is out of credit. Add credits at console.anthropic.com → Settings → Billing (the API is pay-as-you-go, billed separately from a Claude Pro/Max subscription — a few cents per scan).");
+    else if (e.status === 401) setStatus("Your API key was rejected (401). Tap “Change key” and re-enter it.");
     else if (e.status === 429) setStatus("Rate limited (429) — wait a moment and try again.");
     else if (e.message && /Failed to fetch|NetworkError/i.test(e.message)) setStatus("Network error reaching Anthropic. Check your connection and try again.");
     else setStatus("Couldn’t scan the receipt: " + (e.message || "unknown error"));
