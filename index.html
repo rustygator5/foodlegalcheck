@@ -57,7 +57,7 @@
   header p.sub { color: var(--muted); margin: 0 0 24px; font-size: 0.95rem; }
 
   .tabs { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 16px; box-shadow: var(--shadow); }
-  .tab { flex: 1; text-align: center; padding: 10px 8px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: var(--muted); border: none; background: none; transition: all 0.15s; }
+  .tab { flex: 1; text-align: center; padding: 10px 5px; border-radius: 8px; cursor: pointer; font-size: 0.82rem; font-weight: 600; color: var(--muted); border: none; background: none; transition: all 0.15s; white-space: nowrap; }
   .tab.active { background: var(--accent-soft); color: var(--accent); }
   .tab:hover:not(.active) { color: var(--text); }
 
@@ -143,6 +143,18 @@
   .score-pts { font-size:0.82rem; width:54px; text-align:right; }
   .score-pts.muted { color:var(--muted); }
   .score-foot { font-size:0.75rem; color:var(--muted); margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
+
+  #receiptPreview { display:block; max-width:200px; max-height:170px; border-radius:10px; border:1px solid var(--border); margin-top:10px; }
+  .r-item { display:flex; gap:12px; align-items:flex-start; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px; box-shadow:var(--shadow); }
+  .r-grade { flex-shrink:0; width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.95rem; }
+  .r-grade.ok { background:var(--ok-bg); color:var(--ok); }
+  .r-grade.warning { background:var(--warning-bg); color:var(--warning); }
+  .r-grade.restricted { background:var(--restricted-bg); color:var(--restricted); }
+  .r-grade.banned { background:var(--banned-bg); color:var(--banned); }
+  .r-main { flex:1; min-width:0; }
+  .r-name { font-weight:600; font-size:0.95rem; }
+  .r-price { color:var(--muted); font-weight:400; font-size:0.85rem; margin-left:6px; }
+  .r-meta { font-size:0.82rem; color:var(--muted); margin-top:2px; }
   .sources { margin-top: 10px; font-size: 0.8rem; color: var(--muted); }
   .sources a { color: var(--accent); text-decoration: none; }
   .sources a:hover { text-decoration: underline; }
@@ -153,7 +165,7 @@
   .footer-note { text-align:center; font-size:0.78rem; color:var(--muted); margin-top:24px; }
 
   /* camera scanner */
-  .scan-btn { width:100%; margin-top:6px; background:var(--accent-soft); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  .scan-btn { display:block; box-sizing:border-box; text-align:center; width:100%; margin-top:6px; cursor:pointer; background:var(--accent-soft); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
   .scan-btn:hover { filter:none; background:color-mix(in srgb, var(--accent) 14%, transparent); }
   #scanArea { display:none; margin-top:12px; }
   #scanner { width:100%; max-width:420px; margin:0 auto; border-radius:12px; overflow:hidden; background:#000; line-height:0; }
@@ -195,9 +207,10 @@
   </header>
 
   <div class="tabs">
-    <button class="tab active" data-tab="search">🔍 Search by name</button>
+    <button class="tab active" data-tab="search">🔍 Search</button>
     <button class="tab" data-tab="barcode">📷 Barcode</button>
-    <button class="tab" data-tab="paste">📋 Paste ingredients</button>
+    <button class="tab" data-tab="paste">📋 Paste</button>
+    <button class="tab" data-tab="receipt">🧾 Receipt</button>
   </div>
 
   <div class="panel active" id="panel-search">
@@ -234,6 +247,22 @@
       <button class="go" id="pasteBtn">Check ingredients</button>
     </div>
     <p class="hint">Works for any food — just copy the ingredients off the label.</p>
+  </div>
+
+  <div class="panel" id="panel-receipt">
+    <div id="keyUnset">
+      <div class="field">
+        <input type="password" id="apiKeyInput" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off">
+        <button class="go" id="saveKeyBtn">Save</button>
+      </div>
+      <p class="hint">Reading a receipt uses Claude’s vision model, so it needs your own Anthropic API key. It’s saved only in this browser and sent directly to Anthropic with your photo. <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Get a key ↗</a></p>
+    </div>
+    <div id="keySet" style="display:none;">
+      <label class="go scan-btn" for="receiptFile">🧾 Take photo / choose receipt</label>
+      <input type="file" id="receiptFile" accept="image/*" capture="environment" style="display:none;">
+      <p class="hint">Snap the whole receipt in good light. Key (<span id="keyMasked"></span>) stays in this browser; ~a few cents per scan. <a href="#" id="changeKey">Change key</a></p>
+      <img id="receiptPreview" alt="" style="display:none;">
+    </div>
   </div>
 
   <div id="picker"></div>
@@ -1127,6 +1156,210 @@ document.getElementById("pasteBtn").addEventListener("click", () => {
   if (!text) return;
   setStatus("");
   renderResults(analyze([], text), null);
+});
+
+// ===== Receipt scan (Claude vision, bring-your-own-key) =====
+const KEY_STORE = "flc.anthropicKey";
+const apiKeyInput = document.getElementById("apiKeyInput");
+const saveKeyBtn = document.getElementById("saveKeyBtn");
+const keyUnset = document.getElementById("keyUnset");
+const keySet = document.getElementById("keySet");
+const keyMasked = document.getElementById("keyMasked");
+const changeKey = document.getElementById("changeKey");
+const receiptFile = document.getElementById("receiptFile");
+const receiptPreview = document.getElementById("receiptPreview");
+
+function getApiKey() { return localStorage.getItem(KEY_STORE) || ""; }
+function maskKey(k) { return k ? (k.slice(0, 7) + "…" + k.slice(-4)) : ""; }
+function refreshKeyUI() {
+  const k = getApiKey();
+  if (k) { keyUnset.style.display = "none"; keySet.style.display = "block"; keyMasked.textContent = maskKey(k); }
+  else { keyUnset.style.display = "block"; keySet.style.display = "none"; }
+}
+saveKeyBtn.addEventListener("click", () => {
+  const k = apiKeyInput.value.trim();
+  if (!k) return;
+  if (!k.startsWith("sk-ant-")) setStatus("That doesn’t look like an Anthropic key (usually starts with “sk-ant-”). Saved anyway.");
+  localStorage.setItem(KEY_STORE, k);
+  apiKeyInput.value = "";
+  refreshKeyUI();
+});
+changeKey.addEventListener("click", e => { e.preventDefault(); localStorage.removeItem(KEY_STORE); receiptPreview.style.display = "none"; refreshKeyUI(); });
+refreshKeyUI();
+
+// downscale an image file to keep the upload small while staying legible
+function fileToScaledBase64(file, maxEdge) {
+  maxEdge = maxEdge || 2000;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      resolve({ base64: dataUrl.split(",")[1], mediaType: "image/jpeg", previewUrl: dataUrl });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn’t read that image.")); };
+    img.src = url;
+  });
+}
+
+const RECEIPT_SYSTEM = `You read a photo of a U.S. grocery receipt — most often from Publix. Extract every purchased line item and rate how healthy each is.
+
+Stores abbreviate names (e.g. "PUB WHL MLK" = Publix whole milk, "GV SHRP CHDR" = sharp cheddar cheese). Expand each to a clear, normal product name.
+
+Ignore non-item lines: store name/address, phone, date, cashier, subtotal, tax, total, amount tendered, change, card info, savings/coupon summary lines, and loyalty messaging. If a coupon clearly attaches to a specific item, fold it into that item's price.
+
+For each item return:
+- name: the expanded, human-readable product name
+- raw: the text exactly as printed on the receipt
+- category: one of Produce, Dairy, Meat & Seafood, Bakery, Frozen, Snacks, Beverages, Pantry, Prepared, Household, Other
+- price: the line price in U.S. dollars as a number (use 0 if not legible)
+- healthScore: an integer 0-100. 100 = whole or minimally processed and nutritious (fresh produce, plain dairy, lean proteins, whole grains, legumes); ~50 = neutral; low = ultra-processed, sugary, fried, or empty-calorie (soda, candy, chips, sugary cereal). For non-food Household items use 50 and category Household.
+- note: a short reason for the score, 12 words max.
+
+Be fair and consistent, and judge the food itself, not the brand.`;
+
+const RECEIPT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    store: { type: "string" },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          raw: { type: "string" },
+          category: { type: "string" },
+          price: { type: "number" },
+          healthScore: { type: "integer" },
+          note: { type: "string" }
+        },
+        required: ["name", "raw", "category", "price", "healthScore", "note"]
+      }
+    }
+  },
+  required: ["store", "items"]
+};
+
+async function callClaudeReceipt(base64, mediaType) {
+  const body = {
+    model: "claude-opus-4-8",
+    max_tokens: 8000,
+    system: RECEIPT_SYSTEM,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+        { type: "text", text: "Here is my grocery receipt (likely Publix). Extract and score every purchased item." }
+      ]
+    }],
+    output_config: { format: { type: "json_schema", schema: RECEIPT_SCHEMA } }
+  };
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": getApiKey(),
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    let msg = "request failed (" + res.status + ")";
+    try { const e = await res.json(); if (e && e.error && e.error.message) msg = e.error.message; } catch (err) {}
+    const error = new Error(msg); error.status = res.status; throw error;
+  }
+  const data = await res.json();
+  const textBlock = (data.content || []).find(b => b.type === "text");
+  if (!textBlock || !textBlock.text) throw new Error("empty response from Claude");
+  return JSON.parse(textBlock.text);
+}
+
+function gradeFromScore(score) {
+  if (score >= 80) return { g: "A", label: "Excellent", col: "ok" };
+  if (score >= 60) return { g: "B", label: "Good", col: "ok" };
+  if (score >= 40) return { g: "C", label: "Fair", col: "warning" };
+  if (score >= 20) return { g: "D", label: "Poor", col: "restricted" };
+  return { g: "E", label: "Bad", col: "banned" };
+}
+
+function renderReceipt(data) {
+  const results = document.getElementById("results");
+  const items = (data.items || []).filter(it => it && it.name);
+  items.forEach(it => {
+    it.healthScore = Math.max(0, Math.min(100, Math.round(Number(it.healthScore) || 0)));
+    it.price = Number(it.price) || 0;
+  });
+  if (!items.length) {
+    results.innerHTML = `<div class="verdict"><h2>No items found</h2><p>Couldn’t read any line items. Try a clearer, well-lit photo showing the full receipt.</p></div>`;
+    results.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+  const food = items.filter(it => (it.category || "").toLowerCase() !== "household");
+  const basis = food.length ? food : items;
+  const overall = Math.round(basis.reduce((s, it) => s + it.healthScore, 0) / basis.length);
+  const og = gradeFromScore(overall);
+  const total = items.reduce((s, it) => s + it.price, 0);
+  const store = esc(data.store);
+
+  let html = `<div class="score-card">
+    <div class="score-top">
+      <div class="score-circle ${og.col}"><span class="score-num">${overall}</span><span class="score-den">/100</span></div>
+      <div class="score-meta">
+        <div class="score-grade">Grocery score — ${og.g} · ${esc(og.label)}</div>
+        <div class="score-sub">${items.length} item${items.length > 1 ? "s" : ""}${total > 0 ? " · $" + total.toFixed(2) : ""}${store ? " · " + store : ""} · average health of food items</div>
+      </div>
+    </div>
+    <div class="score-foot">Estimated by Claude from your receipt photo. Informational only, not medical advice.</div>
+  </div>`;
+
+  items.forEach(it => {
+    const gi = gradeFromScore(it.healthScore);
+    html += `<div class="r-item">
+      <span class="r-grade ${gi.col}">${gi.g}</span>
+      <div class="r-main">
+        <div class="r-name">${esc(it.name)}${it.price > 0 ? `<span class="r-price">$${it.price.toFixed(2)}</span>` : ""}</div>
+        <div class="r-meta">${esc(it.category || "Other")} · ${it.healthScore}/100 — ${esc(it.note || "")}</div>
+      </div>
+    </div>`;
+  });
+
+  results.innerHTML = html;
+  results.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+receiptFile.addEventListener("change", async () => {
+  const file = receiptFile.files && receiptFile.files[0];
+  receiptFile.value = "";
+  if (!file) return;
+  if (!getApiKey()) { setStatus("Add your Anthropic API key first."); return; }
+  clearResults();
+  let scaled;
+  try { scaled = await fileToScaledBase64(file); }
+  catch (e) { setStatus("Couldn’t read that image. Try another photo."); return; }
+  receiptPreview.src = scaled.previewUrl;
+  receiptPreview.style.display = "block";
+  setStatus("Reading your receipt with Claude… this takes a few seconds.");
+  try {
+    const data = await callClaudeReceipt(scaled.base64, scaled.mediaType);
+    setStatus("");
+    renderReceipt(data);
+  } catch (e) {
+    if (e.status === 401) setStatus("Your API key was rejected (401). Tap “Change key” and re-enter it.");
+    else if (e.status === 429) setStatus("Rate limited (429) — wait a moment and try again.");
+    else if (e.message && /Failed to fetch|NetworkError/i.test(e.message)) setStatus("Network error reaching Anthropic. Check your connection and try again.");
+    else setStatus("Couldn’t scan the receipt: " + (e.message || "unknown error"));
+  }
 });
 
 // disclaimer date
