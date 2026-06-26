@@ -252,15 +252,15 @@
   <div class="panel" id="panel-receipt">
     <div id="keyUnset">
       <div class="field">
-        <input type="password" id="apiKeyInput" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off">
+        <input type="password" id="apiKeyInput" placeholder="Google AIza… (free) or Anthropic sk-ant-…" autocomplete="off">
         <button class="go" id="saveKeyBtn">Save</button>
       </div>
-      <p class="hint">Reading a receipt uses Claude’s vision model, so it needs your own Anthropic API key. It’s saved only in this browser and sent directly to Anthropic with your photo. <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Get a key ↗</a></p>
+      <p class="hint">Reading a receipt uses an AI vision model. Paste a <b>free Google AI Studio key</b> (starts with <code>AIza</code>) — or an Anthropic key (<code>sk-ant-</code>) if you prefer. It’s saved only in this browser and sent straight to the provider with your photo. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Get a free Google key ↗</a><br><span style="opacity:0.85;">Note: on Google’s free tier there are daily limits and your photos may be used to improve their models.</span></p>
     </div>
     <div id="keySet" style="display:none;">
       <label class="go scan-btn" for="receiptFile">🧾 Take photo / choose receipt</label>
       <input type="file" id="receiptFile" accept="image/*" capture="environment" style="display:none;">
-      <p class="hint">Snap the whole receipt in good light. Key (<span id="keyMasked"></span>) stays in this browser; ~a few cents per scan. <a href="#" id="changeKey">Change key</a></p>
+      <p class="hint">Snap the whole receipt in good light. Key (<span id="keyMasked"></span>) stays in this browser. <a href="#" id="changeKey">Change key</a></p>
       <img id="receiptPreview" alt="" style="display:none;">
     </div>
   </div>
@@ -1179,7 +1179,7 @@ function refreshKeyUI() {
 saveKeyBtn.addEventListener("click", () => {
   const k = apiKeyInput.value.trim();
   if (!k) return;
-  if (!k.startsWith("sk-ant-")) setStatus("That doesn’t look like an Anthropic key (usually starts with “sk-ant-”). Saved anyway.");
+  if (!/^(sk-ant-|AIza)/.test(k)) setStatus("That doesn’t look like a Google (AIza…) or Anthropic (sk-ant-…) key. Saved anyway.");
   localStorage.setItem(KEY_STORE, k);
   apiKeyInput.value = "";
   refreshKeyUI();
@@ -1285,6 +1285,72 @@ async function callClaudeReceipt(base64, mediaType) {
   return JSON.parse(textBlock.text);
 }
 
+// Google Gemini schema (OpenAPI-style; uppercase types, no additionalProperties)
+const GEMINI_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    store: { type: "STRING" },
+    items: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          raw: { type: "STRING" },
+          category: { type: "STRING" },
+          price: { type: "NUMBER" },
+          healthScore: { type: "INTEGER" },
+          note: { type: "STRING" }
+        },
+        required: ["name", "raw", "category", "price", "healthScore", "note"]
+      }
+    }
+  },
+  required: ["store", "items"]
+};
+
+async function callGeminiReceipt(base64, mediaType) {
+  const model = "gemini-2.0-flash";
+  const body = {
+    systemInstruction: { parts: [{ text: RECEIPT_SYSTEM }] },
+    contents: [{
+      role: "user",
+      parts: [
+        { inline_data: { mime_type: mediaType, data: base64 } },
+        { text: "Here is my grocery receipt (likely Publix). Extract and score every purchased item." }
+      ]
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: GEMINI_SCHEMA,
+      maxOutputTokens: 8192
+    }
+  };
+  const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": getApiKey() },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    let msg = "request failed (" + res.status + ")";
+    try { const e = await res.json(); if (e && e.error && e.error.message) msg = e.error.message; } catch (err) {}
+    const error = new Error(msg); error.status = res.status; throw error;
+  }
+  const data = await res.json();
+  if (data.promptFeedback && data.promptFeedback.blockReason) throw new Error("Gemini blocked the image (" + data.promptFeedback.blockReason + ").");
+  const cand = data.candidates && data.candidates[0];
+  const parts = cand && cand.content && cand.content.parts;
+  const text = parts ? parts.map(p => p.text || "").join("") : "";
+  if (!text) throw new Error("empty response from Gemini");
+  return JSON.parse(text);
+}
+
+function getProvider() { return getApiKey().startsWith("sk-ant-") ? "anthropic" : "gemini"; }
+function providerName() { return getProvider() === "anthropic" ? "Claude" : "Gemini"; }
+async function analyzeReceipt(base64, mediaType) {
+  return getProvider() === "anthropic" ? callClaudeReceipt(base64, mediaType) : callGeminiReceipt(base64, mediaType);
+}
+
 function gradeFromScore(score) {
   if (score >= 80) return { g: "A", label: "Excellent", col: "ok" };
   if (score >= 60) return { g: "B", label: "Good", col: "ok" };
@@ -1349,17 +1415,24 @@ receiptFile.addEventListener("change", async () => {
   catch (e) { setStatus("Couldn’t read that image. Try another photo."); return; }
   receiptPreview.src = scaled.previewUrl;
   receiptPreview.style.display = "block";
-  setStatus("Reading your receipt with Claude… this takes a few seconds.");
+  setStatus("Reading your receipt with " + providerName() + "… this takes a few seconds.");
   try {
-    const data = await callClaudeReceipt(scaled.base64, scaled.mediaType);
+    const data = await analyzeReceipt(scaled.base64, scaled.mediaType);
     setStatus("");
     renderReceipt(data);
   } catch (e) {
-    if (e.message && /credit balance|too low|insufficient|billing|quota/i.test(e.message)) setStatus("Your Anthropic API account is out of credit. Add credits at console.anthropic.com → Settings → Billing (the API is pay-as-you-go, billed separately from a Claude Pro/Max subscription — a few cents per scan).");
-    else if (e.status === 401) setStatus("Your API key was rejected (401). Tap “Change key” and re-enter it.");
-    else if (e.status === 429) setStatus("Rate limited (429) — wait a moment and try again.");
-    else if (e.message && /Failed to fetch|NetworkError/i.test(e.message)) setStatus("Network error reaching Anthropic. Check your connection and try again.");
-    else setStatus("Couldn’t scan the receipt: " + (e.message || "unknown error"));
+    const m = e.message || "";
+    if (e.status === 401 || /api key not valid|api_key_invalid|invalid x-api-key|authentication_error|permission/i.test(m)) {
+      setStatus("Your API key was rejected. Tap “Change key” and re-enter it (Google keys start with AIza, Anthropic with sk-ant-).");
+    } else if (/credit balance|purchase credits|too low/i.test(m)) {
+      setStatus("Your Anthropic account is out of credit. Add credits at console.anthropic.com → Billing — or use a free Google AI Studio key instead (tap “Change key”).");
+    } else if (e.status === 429 || /resource_exhausted|quota|rate.?limit/i.test(m)) {
+      setStatus("Rate limited or out of today’s free quota — wait a bit and try again.");
+    } else if (/Failed to fetch|NetworkError/i.test(m)) {
+      setStatus("Network error reaching the provider. Check your connection and try again.");
+    } else {
+      setStatus("Couldn’t scan the receipt: " + (m || "unknown error"));
+    }
   }
 });
 
