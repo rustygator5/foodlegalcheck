@@ -53,6 +53,20 @@
     -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  /* "← Dashboard" back link to the Wilson Dashboard hub — same as the other
+     apps. The hub is an installed PWA with no browser back button, so without
+     this there's no way back out. Same-origin (both on rustygator5.github.io),
+     so "/" resolves to the hub. Collapses to an arrow-only tap target on
+     phones. Colors use this app's own palette; the header is a stacked block
+     rather than a flex row, hence the bottom margin. */
+  .backlink { display: inline-flex; align-items: center; gap: 5px; text-decoration: none;
+    color: var(--muted); border: 1px solid var(--border); background: var(--card);
+    border-radius: 9px; padding: 7px 11px; font-weight: 700; font-size: 13px;
+    margin-bottom: 14px; }
+  .backlink:hover { background: var(--accent-soft); color: var(--text); }
+  .backlink .bt { display: inline; }
+  @media (max-width: 560px) { .backlink .bt { display: none; }
+    .backlink { padding: 0; min-width: 44px; min-height: 40px; justify-content: center; font-size: 19px; } }
   header h1 { font-size: 1.7rem; margin: 0 0 4px; letter-spacing: -0.02em; }
   header p.sub { color: var(--muted); margin: 0 0 24px; font-size: 0.95rem; }
 
@@ -202,6 +216,7 @@
 <body>
 <div class="wrap">
   <header>
+    <a class="backlink" href="/" id="backHub" title="Back to Wilson Dashboard">←<span class="bt">Dashboard</span></a>
     <h1>🌍 Is My Food Legal Abroad?</h1>
     <p class="sub">Check whether the ingredients in a U.S. food product are banned, restricted, or warning-labeled in Europe and other countries.</p>
   </header>
